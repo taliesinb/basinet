@@ -1,7 +1,8 @@
 BeginPackage["Basinet`"]
 
 BasinetRun::usage = "BasinetRun[f, dir, niter]"
-BasinetRunAsync::usage = "BasinetRunAsync[script, dir, nkernels, niter]"
+BasinetRunScript::usage = "BasinetRunScript[script, dir, niter]"
+BasinetRunScriptAsync::usage = "BasinetRunScriptAsync[script, dir, nkernels, niter]"
 $BasinetKernelID::usage = "$BasinetKernelID represents the index of the kernel the sampler is being run on."
 
 Begin["`Private`"];
@@ -28,13 +29,20 @@ BasinetRun[f_, dir_, n_:Infinity] := Scope[
 	];
 ];
 
+BasinetRunScript[script_String, dir_, n_:Infinity] := Scope[
+	If[!FileExistsQ[script], ReturnFailed["invscript", script]];
+	func = Get[script];
+	If[FailureQ[func], ReturnFailed[]];
+	BasinetRun[func, dir, n];
+]
+
 istr[x_] := ToString[x, InputForm];
 
 BasinetRunAsync::synscript = "Script file `` contains invalid syntax.";
 
 $KernelPath = First[$CommandLine];
 
-BasinetRunAsync[script_String, dir_String, kn_:1, n_:Infinity] := Scope[
+BasinetRunScriptAsync[script_String, dir_String, kn_:1, n_:Infinity] := Scope[
 	If[!FileExistsQ[script], ReturnFailed["invscript", script]];
 	If[!DirectoryQ[dir], ReturnFailed["invoutdir", dir]];
 	If[!IntegerQ[kn], ReturnFailed["invkcount", kn]];
@@ -43,9 +51,15 @@ BasinetRunAsync[script_String, dir_String, kn_:1, n_:Infinity] := Scope[
 	dir = AbsoluteFileName @ dir;
 	fstr = FileString[script];
 	If[Block[{$Context = "Dummy`"}, !SyntaxQ[fstr]], ReturnFailed["synscript", script]];
+	logdir = FileNameJoin[{dir, "_log"}];
+	If[FileExistsQ[logdir],
+		stale = FileNames["*.log", logdir];
+		staledir = EnsureDirectory[{logdir, "old"}];
+		RenameFile[#, FileNameJoin[{staledir, FileNameTake[#]}]]& /@ stale;
+	];
 	script = istr[script];	
 	dir = istr[dir];
-	n = IntegerString[n];
+	n = IntegerString[n];	
 	Table[
 		codestring = StringJoin[
 			$GetMeString,
@@ -71,7 +85,7 @@ BasinetRunInternal[id_, script_, dir_, n_] := Block[
 	$HistoryLength = 0;
 	logdir = EnsureDirectory[{dir, "_log"}];
 	log = OpenWrite[
-		FileNameJoin[{logdir, IntegerString[$ProcessID]}],
+		FileNameJoin[{logdir, IntegerString[$ProcessID] <> ".log"}],
 		BinaryFormat -> True, FormatType -> OutputForm
 	];
 	$Output = {log};
@@ -79,6 +93,7 @@ BasinetRunInternal[id_, script_, dir_, n_] := Block[
 	SetOptions[$Output, FormatType -> OutputForm];
 	Print["Kernel #", id, " (process ", $ProcessID, ") is using master seed ", seed, "."];
 	Print["Getting script \"", script, "\"."];
+	SetDirectory[DirectoryName[script]];
 	func = Get[script];
 	Print["Sampling..."];
 	BasinetRun[func, dir, n];
